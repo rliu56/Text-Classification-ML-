@@ -1,7 +1,31 @@
 test: stopWords noStopWords
 
-stopWords: NB.py
+stopWords: NBStop LRStop PerStop
+
+noStopWords: NBNoStop LRNoStop PerNoStop
+
+NBStop: NB.py
 	python ./NB.py ./ ./train ./test
 
-noStopWords: NB.py
-	python ./NB.py ./not_A_Directory ./train ./test
+NBNoStop: NB.py
+	python ./NB.py ./NA ./train ./test
+
+LRStop: LR.py
+	python ./LR.py ./ ./train ./test -2
+	python ./LR.py ./ ./train ./test -1
+	python ./LR.py ./ ./train ./test 0
+	python ./LR.py ./ ./train ./test 1
+	python ./LR.py ./ ./train ./test 2
+
+LRNoStop: LR.py
+	python ./LR.py ./NA ./train ./test -2
+	python ./LR.py ./NA ./train ./test -1
+	python ./LR.py ./NA ./train ./test 0
+	python ./LR.py ./NA ./train ./test 1
+	python ./LR.py ./NA ./train ./test 2
+  
+PerStop: Perceptron.py
+	python ./Perceptron.py ./ ./train ./test
+
+PerNoStop: Perceptron.py
+	python ./Perceptron.py ./NA ./train ./test

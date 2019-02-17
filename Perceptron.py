@@ -185,7 +185,7 @@ for i in range(len(etaTube)):
 		weights, totalCount = trainPerceptron(classes, trainingDir, vocabulary, stopWords, eta, iteration)
 		accuracy = testPerceptron(classes, testDir, vocabulary, stopWords, weights, totalCount)
 
-		resultString = 'with '
+		resultString = ''
 		if (len(stopWords) == 0): resultString = 'without '
 		print '\n-----------------------------------------------------------------------\n'
 		print "  eta =", eta, "iteration =", iteration

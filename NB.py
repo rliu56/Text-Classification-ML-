@@ -5,10 +5,6 @@ import operator
 import sys
 import glob
 import re
-import time
-import random
-from collections import Counter
-
 
 # this singularization function refers to 'Inflector 2.0.11', from https://pypi.python.org/pypi/Inflector
 def singularize(word) :
@@ -95,6 +91,47 @@ def extractVocabulary(classes, trainingDir, stopWords):
 			docFile.close()
 	return list(set(formatWords(list(set(vocabulary)), stopWords)))	# use set to remove duplicate words
 
+# count total number of documents
+def countDocs(classes,trainingDir):
+	count = 0
+	for c in classes:
+		for filename in glob.glob(trainingDir + '/' + c + '/*.txt'):
+			count += 1
+	return count
+
+# count number of documents of each class
+def countDocsInClass(trainingDir, c):
+	count = 0
+	for filename in glob.glob(trainingDir + '/' + c + '/*.txt'):
+		count += 1
+	return count
+
+# concatenate text of all documents in the same class
+def concatenateTextOfAllDocsInClass(trainingDir, c, stopWords):
+	textClass = []
+	for filename in glob.glob(trainingDir + '/' + c + '/*.txt'):
+		docFile = open(filename)
+		for line in docFile:
+			textClass = textClass + (re.findall(r'\w+', line)) 
+		docFile.close()
+	textClass = formatWords(textClass, stopWords)
+	return textClass
+
+# extract words from test document and remove those aren't in vocabulary
+def extractTokensFromDoc(vocabulary, doc, stopWords):
+	words = []
+	docFile = open(doc)
+	for line in docFile:
+		words = words + (re.findall(r'\w+', line)) 
+	docFile.close()
+	words = list(set(formatWords(words, stopWords)))
+	removeWords = []
+	for word in words:
+		if not (word in vocabulary): 
+			removeWords.append(word)
+	for word in removeWords: words.remove(word)
+	return words
+
 # read stop words from stopWords.txt
 def getStopWords(stopWordsDir):
 	stopWords = []
@@ -106,98 +143,61 @@ def getStopWords(stopWordsDir):
 		pass
 	return stopWords
 
-# extract words from test document and remove those aren't in vocabulary
-def extractTokensFromDoc(vocabulary, doc, stopWords):
-	words = []
-	docFile = open(doc)
-	for line in docFile:
-		words = words + (re.findall(r'\w+', line)) 
-	docFile.close()
-	words = formatWords(words, stopWords)
-	removeWords = []
-	for word in words:
-		if not (word in vocabulary): 
-			removeWords.append(word)
-	for word in removeWords: words.remove(word)
-	docFile.close()
-	return words
-
-def extractExamples(director, classes, vocabulary, stopWords):
-	inputs = []
-	outputs = []
+# train with training data using Multinomial Naive Bayes 
+def trainMultinomialNB(classes, trainingDir, stopWords):
+	prior = {}
+	vocabulary = extractVocabulary(classes, trainingDir, stopWords)
+	condProb = {t:{} for t in vocabulary}
+	numDocs = countDocs(classes, trainingDir)	
 	for c in classes:
-		for filename in glob.glob(director + '/' + c + '/*.txt'):
-			words = extractTokensFromDoc(vocabulary, filename, stopWords)
-			wordCounter = Counter(words)
-			inputsRow = [0.0] * (len(vocabulary) + 1)
-			inputsRow[0] = 1.0
-			for k,v in wordCounter.items():
-				inputsRow[vocabulary.index(k) + 1] = float(v)
-			inputs = inputs + [inputsRow]
-			outputs = outputs + [float(classes.index(c))]
-	return inputs, outputs
+		numClass = countDocsInClass(trainingDir, c)
+		prior[c] = float(numClass) / numDocs
+		textClass = concatenateTextOfAllDocsInClass(trainingDir, c, stopWords)
+		tokensTerm = {}
+		tokensTotal = 0
+		numUniqueTerms = 0
+		for t in vocabulary:
+			tokensTerm[t] = textClass.count(t)
+			tokensTotal += tokensTerm[t]
+			if (tokensTerm[t]): numUniqueTerms += 1
+		for t in vocabulary:
+			condProb[t][c] = (float(tokensTerm[t]) + 1.0) / (tokensTotal + numUniqueTerms)
+	return vocabulary, prior, condProb
 
-def sigmoid(x):
-	if x < 0:
-		return 1 - 1 / (1 + math.exp(x))
-	return 1.0 / (1 + math.exp(-x))
+# apply multinomial Naive Bayes to test a document
+def applyMultinomialNB(classes, vocabulary, prior, condProb, d, stopWords):
+	score = {}
+	words = extractTokensFromDoc(vocabulary, d, stopWords)
+	for c in classes:
+		score[c] = math.log(prior[c])
+		for t in words:
+			score[c] += math.log(condProb[t][c])
+	maxScoreClass = max(score.iteritems(), key = operator.itemgetter(1))[0]
+	return maxScoreClass
 
-def dotProduct(A, B):
-	return sum([A[i] * B[i] for i in range(len(A))])
 
-def constantProduct(n, A):
-	return [n * A[i] for i in range(len(A))]
-	
-def matrixAddition(A, B):
-	return [A[i] + B[i] for i in range(len(A))]
-
-def matrixSubtraction(A, B):
-	return [A[i] - B[i] for i in range(len(A))]
-	
-def trainLR(classes, trainingDir, vocabulary, stopWords, LAMBDA):
-	startTime = time.time()
-	weights = [0.0] * (len(vocabulary) + 1)
-	inputs, outputs = extractExamples(trainingDir, classes, vocabulary, stopWords)
-	
-	ETA = 0.021
-	for loop in range(200):
-		dW = [0.0] * (len(vocabulary) + 1)
-		for i in range(len(inputs)):
-			estimation = sigmoid(dotProduct(inputs[i], weights))
-			error= outputs[i] - estimation
-			dW = matrixAddition(dW, constantProduct(error, inputs[i]))
-		weights = matrixAddition(weights, matrixSubtraction(
-		constantProduct(ETA, dW), constantProduct(ETA * LAMBDA, weights)))
-	totalCount = len(outputs)
-	print 'Training completed in %fs' % (time.time() - startTime)  
-	return weights, totalCount
-	
-def testLR(classes, testDir, vocabulary, stopWords, weights, totalCount):
-	inputs, outputs = extractExamples(testDir, classes, vocabulary, stopWords)
-	correctCount = 0
-	for i in range(len(inputs)):
-		prediction = sigmoid(dotProduct(inputs[i], weights)) > 0.5
-		if prediction == bool(outputs[i]):
-			correctCount += 1
-	return float(correctCount) / totalCount
-
-if len(sys.argv) != 5: sys.exit()	# exit if invalid number of arguments has been input
+if len(sys.argv) != 4: sys.exit()	# exit if invalid number of arguments has been input
 
 classes = ["ham", "spam"]	# only 2 classes for this homework
 stopWordsDir = sys.argv[1]	# stopWords.txt directory
 trainingDir = sys.argv[2]	# training data directory
 testDir = sys.argv[3]		# test data directory
-LAMBDA = math.exp(int(sys.argv[4]))
-
 stopWords = getStopWords(stopWordsDir)	# list storing stop words
-vocabulary = extractVocabulary(classes, trainingDir, stopWords)
-weights, totalCount = trainLR(classes, trainingDir, vocabulary, stopWords, LAMBDA)
-accuracy = testLR(classes, testDir, vocabulary, stopWords, weights, totalCount)
+vocabulary, prior, condProb = trainMultinomialNB(classes, trainingDir, stopWords)
 
+numTestDocs = 0;	# total number of test documents
+numCorrect = 0; 	# number of documents that are successfully predicted
+
+# test every document under test folder
+for c in classes:
+	for doc in glob.glob(testDir + '/' + c + '/*.txt'):
+		classification = applyMultinomialNB(classes, vocabulary, prior, condProb, doc, stopWords)
+		numTestDocs += 1
+		if (classification == c): numCorrect += 1
+	
 resultString = ''
 if (len(stopWords) == 0): resultString = 'without '
 print '\n-----------------------------------------------------------------------\n'
-print "  Lambda =", LAMBDA
-print '\n	Accuracy ' + resultString + 'throwing stop words is: ', accuracy
+print '	Accuracy ' + resultString + 'throwing stop words is: ', float(numCorrect) / numTestDocs
 print '\n-----------------------------------------------------------------------\n'
 
